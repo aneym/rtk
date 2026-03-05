@@ -497,6 +497,87 @@ max_file_size = 1048576 # 1MB per file max
 
 **Supported commands**: cargo (build/test/clippy/check/install/nextest), vitest, pytest, lint (eslint/biome/ruff/pylint/mypy), tsc, go (test/build/vet), err, test.
 
+## Custom Filters
+
+RTK supports a declarative TOML-based filter DSL that lets you add command filters **without writing Rust**. A 10-line TOML block is enough for commands with stable, line-oriented output.
+
+### Lookup priority (first match wins)
+
+| Level | File | Scope |
+|-------|------|-------|
+| 1 | `.rtk/filters.toml` | Project-local — commit with the repo |
+| 2 | `~/.config/rtk/filters.toml` | User-global — applies to all projects |
+| 3 | Built-in | Shipped with the binary |
+| 4 | Passthrough | Command runs unfiltered |
+
+`rtk init` generates a commented template for both levels automatically.
+
+### Filter primitives
+
+| Primitive | Effect |
+|-----------|--------|
+| `strip_ansi` | Remove ANSI escape sequences |
+| `replace` | Regex find+replace, line-by-line, chainable |
+| `match_output` | Short-circuit: if output matches pattern, emit a message and stop |
+| `strip_lines_matching` | Drop lines matching any regex in the list |
+| `keep_lines_matching` | Keep only lines matching any regex |
+| `truncate_lines_at` | Cap line length at N chars (unicode-safe) |
+| `head_lines` / `tail_lines` | Keep first/last N lines |
+| `max_lines` | Absolute output line cap |
+| `on_empty` | Message to emit when filtered output is empty |
+
+### Example: `.rtk/filters.toml`
+
+```toml
+schema_version = 1
+
+[filters.my-tool]
+description = "Compact my-tool build output"
+match_command = "^my-tool\\s+build"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Downloading",
+  "^Installing",
+]
+max_lines = 30
+on_empty = "my-tool: ok"
+```
+
+### Inline tests
+
+Add `[[tests.<filter-name>]]` sections to verify your filters:
+
+```toml
+[[tests.my-tool]]
+name = "strips download noise"
+input = "Downloading dep v1.0\nBuild succeeded"
+expected = "Build succeeded"
+```
+
+Run with `rtk verify` (or `rtk verify --require-all` to enforce test coverage).
+
+### Built-in filters (18 total)
+
+| Filter | Command | Strategy |
+|--------|---------|----------|
+| `make` | `make` | strips `make[N]:` lines |
+| `terraform-plan/init/validate/fmt` | `terraform …` | strips state refresh noise |
+| `tofu-plan/init/validate/fmt` | `tofu …` | same, for OpenTofu |
+| `git-checkout/merge/remote` | `git …` | short-circuit on success messages |
+| `cargo-run` | `cargo run` | strips build noise, keeps program output |
+| `du` | `du` | strips blank lines, caps at 40 lines |
+| `fail2ban-client` | `fail2ban-client` | strips blank lines |
+| `iptables` | `iptables` | strips Docker-generated chains |
+| `mix-format/compile` | `mix …` | strips Elixir compile noise |
+| `shopify-theme` | `shopify theme push\|pull` | keeps last 5 lines (summary) |
+| `pio-run` | `pio run` | strips PlatformIO build noise |
+| `mvn-build` | `mvn compile\|package\|…` | strips Maven `[INFO]` noise |
+| `pre-commit` | `pre-commit` | strips `[INFO]` install lines |
+| `helm` | `helm` | strips blank lines and glog warnings |
+| `gcloud` | `gcloud` | strips blank lines |
+| `ansible-playbook` | `ansible-playbook` | strips `ok:` / `skipping:` lines |
+
 ## Auto-Rewrite Hook (Recommended)
 
 The most effective way to use rtk is with the **auto-rewrite hook** for Claude Code. Instead of relying on CLAUDE.md instructions (which subagents may ignore), this hook transparently intercepts Bash commands and rewrites them to their rtk equivalents before execution.
